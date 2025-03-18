@@ -27,9 +27,6 @@ collection = db["deleted_messages"]
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID"))
 
-# AutoMod通知チャンネルIDを環境変数から取得
-AUTOMOD_NOTIFICATION_CHANNEL_ID = int(os.getenv("AUTOMOD_NOTIFICATION_CHANNEL_ID"))
-
 # 無視するロールIDを環境変数から取得し、リスト形式に変換
 IGNORED_ROLE_IDS = list(map(int, os.getenv("IGNORED_ROLE_IDS", "").split(',')))
 
@@ -77,60 +74,6 @@ async def on_message_delete(message):
             embed.set_footer(text="削除メッセージ記録")
             await log_channel.send(embed=embed)
 
-# AutoMod通知の処理
-@bot.event
-async def on_message(message):
-    # Botのメッセージは無視
-    if message.author.bot:
-        return
-
-    # AutoMod通知チャンネルの監視
-    if message.channel.id == AUTOMOD_NOTIFICATION_CHANNEL_ID:  # AutoMod通知チャンネルID
-        if message.embeds:
-            embed = message.embeds[0]
-            
-            # 送信者名（AutoModの場合は不明な場合もある）
-            author_name = embed.author.name if embed.author else "不明なユーザー"
-            description = embed.description or "（本文なし）"
-
-            # Embedフィールドから必要な情報を取り出し
-            fields_text = ""
-            for field in embed.fields:
-                fields_text += f"{field.name}: {field.value}\n"
-
-            # Decision ID（AutoModによるアクションを識別するため）
-            decision_id = embed.fields[0].value  # 必要に応じて正しい位置を取得
-
-            # MongoDBに保存（AutoModの通知も保存）
-            automod_notification = {
-                "author_name": author_name,
-                "description": description,
-                "fields_text": fields_text,
-                "decision_id": decision_id,
-                "timestamp": datetime.utcnow()
-            }
-            result = collection.insert_one(automod_notification)
-            print(f"AutoMod通知をログに記録 (ID: {result.inserted_id})")
-
-            # AutoMod通知をログチャンネルに送信
-            log_channel = bot.get_channel(LOG_CHANNEL_ID)
-            if log_channel:
-                embed_log = discord.Embed(
-                    title="AutoModによるメッセージ削除",
-                    color=discord.Color.orange(),
-                    timestamp=datetime.utcnow()
-                )
-                embed_log.add_field(name="送信者", value=author_name, inline=True)
-                embed_log.add_field(name="メッセージ内容", value=description, inline=False)
-                embed_log.add_field(name="詳細", value=fields_text, inline=False)
-                embed_log.add_field(name="Decision ID", value=decision_id, inline=False)
-                embed_log.set_footer(text="AutoMod通知")
-                await log_channel.send(embed=embed_log)
-
-    # コマンドも処理するために必要
-    await bot.process_commands(message)
-
-# 復元コマンド
 @bot.command()
 async def 復元(ctx, msg_id: str):
     from bson.objectid import ObjectId
@@ -150,7 +93,7 @@ async def 復元(ctx, msg_id: str):
             embed.set_footer(text="復元完了")
             await ctx.send(embed=embed)
         else:
-            # AutoMod通知を復元
+            # AutoMod通知を復元（Decision IDを文字列として検索）
             automod_notification = collection.find_one({"decision_id": msg_id})
             if automod_notification:
                 embed = discord.Embed(
@@ -164,7 +107,7 @@ async def 復元(ctx, msg_id: str):
                 embed.set_footer(text="復元完了")
                 await ctx.send(embed=embed)
             else:
-                await ctx.send("指定されたIDのメッセージが見つかりません。")
+                await ctx.send("指定されたIDのAutoModメッセージが見つかりません。")
     except Exception as e:
         await ctx.send(f"エラーが発生しました: {str(e)}")
 
