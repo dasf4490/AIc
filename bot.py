@@ -1,10 +1,11 @@
 import discord
 import os
+import asyncio
 from discord.ext import commands
-from datetime import datetime, timezone
-from dotenv import load_dotenv
 from pymongo import MongoClient
-from bson import ObjectId
+from datetime import datetime, timedelta, timezone
+from dotenv import load_dotenv
+from bson import ObjectId  # ObjectIdのインポート
 
 # .envファイルから環境変数を読み込む
 load_dotenv()
@@ -36,6 +37,8 @@ AUTOMOD_NOTIFICATION_CHANNEL_ID = int(os.getenv("AUTOMOD_NOTIFICATION_CHANNEL_ID
 @bot.event
 async def on_ready():
     print(f"Botが起動しました - {bot.user.name}")
+    # 古いデータを削除するタスクを起動
+    bot.loop.create_task(delete_old_messages())
 
 @bot.event
 async def on_message_delete(message):
@@ -76,27 +79,33 @@ async def on_message_delete(message):
             await log_channel.send(embed=embed)
 
 @bot.command()
-async def 復元(ctx, *, message_content: str):
-    """指定されたメッセージを復元して送信する"""
+async def 復元(ctx, msg_id: str):
     try:
-        # メッセージを送信するチャンネルを指定
-        channel = ctx.channel  # 現在のチャンネルに送信
-
-        # 指定されたメッセージをそのまま送信
-        await channel.send(message_content)
-
-        # メッセージ送信確認
-        await ctx.send(f"復元されたメッセージ: {message_content}")
-
+        # 通常のメッセージはObjectIdで検索
+        msg_data = collection.find_one({"_id": ObjectId(msg_id)})
+        if msg_data:
+            embed = discord.Embed(
+                title="復元されたメッセージ",
+                color=discord.Color.green(),
+                timestamp=datetime.utcnow()
+            )
+            embed.add_field(name="内容", value=msg_data['content'], inline=False)
+            embed.add_field(name="送信者", value=msg_data['author'], inline=True)
+            embed.add_field(name="元のチャンネル", value=msg_data['channel_name'], inline=True)
+            embed.set_footer(text="復元完了")
+            await ctx.send(embed=embed)
+        else:
+            await ctx.send("指定されたIDのメッセージが見つかりません。")
     except Exception as e:
         await ctx.send(f"エラーが発生しました: {str(e)}")
 
 @bot.command()
 async def automod_復元(ctx, decision_id: str):
-    """AutoModによるメッセージ削除通知を復元する"""
     try:
-        # AutoModの通知を取得
+        # AutoModの通知もdecision_idを文字列として保存しているため、文字列で検索
         msg_data = collection.find_one({"decision_id": decision_id})
+        
+        # もし AutoMod メッセージが見つかった場合
         if msg_data:
             # AutoModの内容だけを復元
             embed = discord.Embed(
@@ -112,7 +121,19 @@ async def automod_復元(ctx, decision_id: str):
     except Exception as e:
         await ctx.send(f"エラーが発生しました: {str(e)}")
 
-# AutoMod通知を監視するための処理
+@bot.command()
+async def メッセージ(ctx, *, content: str):
+    """ユーザーが入力したメッセージをBotが送信するコマンド"""
+    await ctx.send(content)
+
+async def delete_old_messages():
+    while True:
+        threshold_time = datetime.utcnow() - timedelta(hours=24)
+        result = collection.delete_many({"timestamp": {"$lt": threshold_time}})
+        if result.deleted_count > 0:
+            print(f"{result.deleted_count}件の古いメッセージを削除しました。")
+        await asyncio.sleep(3600)
+
 @bot.event
 async def on_message(message):
     # Botのメッセージは無視
@@ -141,7 +162,7 @@ async def on_message(message):
                 "author_name": author_name,
                 "description": description,
                 "fields_text": fields_text,
-                "decision_id": decision_id,  # 文字列として保存
+                "decision_id": decision_id,  # decision_idを文字列として保存
                 "timestamp": datetime.utcnow()
             }
             result = collection.insert_one(automod_notification)
@@ -165,5 +186,4 @@ async def on_message(message):
     # コマンドも処理するために必要
     await bot.process_commands(message)
 
-# Botの起動
 bot.run(DISCORD_TOKEN)
