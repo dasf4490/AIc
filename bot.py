@@ -140,14 +140,44 @@ async def on_message(message):
             for field in embed.fields:
                 fields_text += f"{field.name}: {field.value}\n"
 
+            # decision_idを取得
+            decision_id = embed.fields[0].value  # 必要に応じて正しい位置を取得
+
             # Webhookで送る内容
             webhook_message = f"🔧 **AutoMod ブロック通知** 🔧\n\n" \
                               f"👤 **送信者**: {author_name}\n" \
                               f"💬 **メッセージ**: {description}\n" \
-                              f"{fields_text}"
+                              f"{fields_text}\n" \
+                              f"🆔 **Decision ID**: {decision_id}"
 
             # Webhook送信
             await send_to_webhook(username="AutoMod Logger", avatar_url=None, content=webhook_message)
+
+            # MongoDBに保存
+            automod_notification = {
+                "author_name": author_name,
+                "description": description,
+                "fields_text": fields_text,
+                "decision_id": decision_id,
+                "timestamp": datetime.utcnow()
+            }
+            result = collection.insert_one(automod_notification)
+            print(f"AutoMod通知をログに記録 (ID: {result.inserted_id})")
+
+            # AutoMod通知をログチャンネルに送信
+            log_channel = bot.get_channel(LOG_CHANNEL_ID)
+            if log_channel:
+                embed_log = discord.Embed(
+                    title="AutoModによるメッセージ削除",
+                    color=discord.Color.orange(),
+                    timestamp=datetime.utcnow()
+                )
+                embed_log.add_field(name="送信者", value=author_name, inline=True)
+                embed_log.add_field(name="メッセージ内容", value=description, inline=False)
+                embed_log.add_field(name="詳細", value=fields_text, inline=False)
+                embed_log.add_field(name="Decision ID", value=decision_id, inline=False)
+                embed_log.set_footer(text="AutoMod通知")
+                await log_channel.send(embed=embed_log)
 
     # コマンドも処理するために必要
     await bot.process_commands(message)
