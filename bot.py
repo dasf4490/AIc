@@ -3,7 +3,7 @@ import os
 import asyncio
 from discord.ext import commands
 from pymongo import MongoClient
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from bson import ObjectId  # ObjectIdのインポート
 
@@ -102,14 +102,11 @@ async def 復元(ctx, msg_id: str):
 @bot.command()
 async def automod_復元(ctx, decision_id: str):
     try:
-        # decision_idをObjectId型に変換して検索
-        decision_object_id = ObjectId(decision_id)
+        # AutoModの通知もdecision_idを文字列として保存しているため、文字列で検索
+        msg_data = collection.find_one({"decision_id": decision_id})
         
-        # ObjectIdとして検索
-        msg_data = collection.find_one({"decision_id": decision_object_id})
-
+        # もし AutoMod メッセージが見つかった場合
         if msg_data:
-            print(f"AutoModのデータが見つかりました: {msg_data}")  # デバッグ用
             # AutoModの内容だけを復元
             embed = discord.Embed(
                 title="AutoMod復元されたメッセージ",
@@ -119,24 +116,15 @@ async def automod_復元(ctx, decision_id: str):
             embed.add_field(name="メッセージ内容", value=msg_data['description'], inline=False)
             embed.set_footer(text="AutoMod復元完了")
             await ctx.send(embed=embed)
-
-            # ログチャンネルに送信
-            log_channel = bot.get_channel(LOG_CHANNEL_ID)
-            if log_channel:
-                embed_log = discord.Embed(
-                    title="AutoModによるメッセージ削除",
-                    color=discord.Color.orange(),
-                    timestamp=datetime.utcnow()
-                )
-                embed_log.add_field(name="送信者", value=msg_data['author_name'], inline=True)
-                embed_log.add_field(name="メッセージ内容", value=msg_data['description'], inline=False)
-                embed_log.set_footer(text="AutoMod通知")
-                await log_channel.send(embed=embed_log)
         else:
-            print(f"指定されたIDのAutoModメッセージが見つかりませんでした")  # デバッグ用
             await ctx.send("指定されたIDのAutoModメッセージが見つかりません。")
     except Exception as e:
         await ctx.send(f"エラーが発生しました: {str(e)}")
+
+@bot.command()
+async def メッセージ(ctx, *, content: str):
+    """ユーザーが入力したメッセージをBotが送信するコマンド"""
+    await ctx.send(content)
 
 async def delete_old_messages():
     while True:
@@ -166,7 +154,7 @@ async def on_message(message):
             for field in embed.fields:
                 fields_text += f"{field.name}: {field.value}\n"
 
-            # Decision ID（AutoModによるアクションを識別するため）を取得
+            # Decision ID（AutoModによるアクションを識別するため）
             decision_id = embed.fields[0].value  # 必要に応じて正しい位置を取得
 
             # MongoDBに保存（AutoModの通知も保存）
@@ -174,7 +162,7 @@ async def on_message(message):
                 "author_name": author_name,
                 "description": description,
                 "fields_text": fields_text,
-                "decision_id": ObjectId(decision_id),  # decision_idをObjectIdとして保存
+                "decision_id": decision_id,  # decision_idを文字列として保存
                 "timestamp": datetime.utcnow()
             }
             result = collection.insert_one(automod_notification)
