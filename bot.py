@@ -88,7 +88,7 @@ async def on_message(message):
         if message.embeds:
             embed = message.embeds[0]
 
-            # 送信者名（AutoModの場合は不明な場合もある）
+            # 送信者名（AutoModの場合は不明なユーザー）
             author_name = embed.author.name if embed.author else "不明なユーザー"
             description = embed.description or "（本文なし）"
 
