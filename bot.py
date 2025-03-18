@@ -121,11 +121,6 @@ async def automod_復元(ctx, decision_id: str):
     except Exception as e:
         await ctx.send(f"エラーが発生しました: {str(e)}")
 
-@bot.command()
-async def メッセージ(ctx, *, content: str):
-    """ユーザーが入力したメッセージをBotが送信するコマンド"""
-    await ctx.send(content)
-
 async def delete_old_messages():
     while True:
         threshold_time = datetime.utcnow() - timedelta(hours=24)
@@ -154,15 +149,15 @@ async def on_message(message):
             for field in embed.fields:
                 fields_text += f"{field.name}: {field.value}\n"
 
-            # Decision ID（AutoModによるアクションを識別するため）
-            decision_id = embed.fields[0].value  # 必要に応じて正しい位置を取得
+            # 生成されたObjectIdをdecision_idとして保存
+            decision_id = str(ObjectId())  # ObjectIdを生成
 
             # MongoDBに保存（AutoModの通知も保存）
             automod_notification = {
                 "author_name": author_name,
                 "description": description,
                 "fields_text": fields_text,
-                "decision_id": decision_id,  # decision_idを文字列として保存
+                "decision_id": decision_id,  # 生成したObjectIdを決定IDとして保存
                 "timestamp": datetime.utcnow()
             }
             result = collection.insert_one(automod_notification)
