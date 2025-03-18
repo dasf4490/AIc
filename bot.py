@@ -100,10 +100,10 @@ async def 復元(ctx, msg_id: str):
         await ctx.send(f"エラーが発生しました: {str(e)}")
 
 @bot.command()
-async def automod_復元(ctx, msg_id: str):
+async def automod_復元(ctx, decision_id: str):
     try:
-        # AutoMod通知は文字列として`decision_id`で検索
-        msg_data = collection.find_one({"decision_id": msg_id})
+        # AutoModの通知は決定IDを文字列として検索
+        msg_data = collection.find_one({"decision_id": decision_id})
         if msg_data:
             # AutoModの内容だけを復元
             embed = discord.Embed(
@@ -155,7 +155,7 @@ async def on_message(message):
                 "author_name": author_name,
                 "description": description,
                 "fields_text": fields_text,
-                "decision_id": decision_id,
+                "decision_id": decision_id,  # 文字列として保存
                 "timestamp": datetime.utcnow()
             }
             result = collection.insert_one(automod_notification)
