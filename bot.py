@@ -58,7 +58,7 @@ async def on_message_delete(message):
             "author": str(message.author),
             "channel_name": message.channel.name,
             "channel_id": message.channel.id,
-            "timestamp": datetime.datetime.now(timezone.utc)  # UTCのタイムゾーンを使用
+            "timestamp": datetime.now(timezone.utc)  # UTCで現在時刻を保存
         }
         result = collection.insert_one(deleted_message)
         print(f"削除されたメッセージを記録 (ID: {result.inserted_id})")
@@ -69,7 +69,7 @@ async def on_message_delete(message):
             embed = discord.Embed(
                 title="削除されたメッセージ記録",
                 color=discord.Color.red(),
-                timestamp=datetime.datetime.now(timezone.utc)  # UTCのタイムゾーンを使用
+                timestamp=datetime.now(timezone.utc)
             )
             embed.add_field(name="内容", value=message.content, inline=False)
             embed.add_field(name="送信者", value=str(message.author), inline=True)
@@ -87,7 +87,7 @@ async def 復元(ctx, msg_id: str):
             embed = discord.Embed(
                 title="復元されたメッセージ",
                 color=discord.Color.green(),
-                timestamp=datetime.datetime.now(timezone.utc)  # UTCのタイムゾーンを使用
+                timestamp=datetime.now(timezone.utc)
             )
             embed.add_field(name="内容", value=msg_data['content'], inline=False)
             embed.add_field(name="送信者", value=msg_data['author'], inline=True)
@@ -103,13 +103,13 @@ async def 復元(ctx, msg_id: str):
 async def automod_復元(ctx, decision_id: str):
     try:
         # AutoModの通知もObjectIdとして保存された場合、ObjectIdで検索
-        msg_data = collection.find_one({"decision_id": ObjectId(decision_id)})
+        msg_data = collection.find_one({"decision_id": decision_id})
         if msg_data:
             # AutoModの内容だけを復元
             embed = discord.Embed(
                 title="AutoMod復元されたメッセージ",
                 color=discord.Color.green(),
-                timestamp=datetime.datetime.now(timezone.utc)  # UTCのタイムゾーンを使用
+                timestamp=datetime.now(timezone.utc)  # UTCタイムゾーンで現在時刻を取得
             )
             embed.add_field(name="メッセージ内容", value=msg_data['description'], inline=False)
             embed.set_footer(text="AutoMod復元完了")
@@ -121,7 +121,7 @@ async def automod_復元(ctx, decision_id: str):
 
 async def delete_old_messages():
     while True:
-        threshold_time = datetime.datetime.now(timezone.utc) - timedelta(hours=24)
+        threshold_time = datetime.now(timezone.utc) - timedelta(hours=24)
         result = collection.delete_many({"timestamp": {"$lt": threshold_time}})
         if result.deleted_count > 0:
             print(f"{result.deleted_count}件の古いメッセージを削除しました。")
@@ -155,8 +155,8 @@ async def on_message(message):
                 "author_name": author_name,
                 "description": description,
                 "fields_text": fields_text,
-                "decision_id": ObjectId(),  # ObjectIdとして保存
-                "timestamp": datetime.datetime.now(timezone.utc)  # UTCのタイムゾーンを使用
+                "decision_id": decision_id,
+                "timestamp": datetime.now(timezone.utc)
             }
             result = collection.insert_one(automod_notification)
             print(f"AutoMod通知をログに記録 (ID: {result.inserted_id})")
@@ -167,7 +167,7 @@ async def on_message(message):
                 embed_log = discord.Embed(
                     title="AutoModによるメッセージ削除",
                     color=discord.Color.orange(),
-                    timestamp=datetime.datetime.now(timezone.utc)  # UTCのタイムゾーンを使用
+                    timestamp=datetime.now(timezone.utc)
                 )
                 embed_log.add_field(name="送信者", value=author_name, inline=True)
                 embed_log.add_field(name="メッセージ内容", value=description, inline=False)
