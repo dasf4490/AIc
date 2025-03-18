@@ -40,6 +40,44 @@ async def on_ready():
     bot.loop.create_task(delete_old_messages())
 
 @bot.event
+async def on_message_delete(message):
+    if message.guild:  # サーバー内のメッセージか確認
+        # メッセージ送信者のロールIDを取得
+        author_role_ids = [role.id for role in message.author.roles]
+
+        # 無視するロールIDを持っている場合、記録しない
+        if any(role_id in IGNORED_ROLE_IDS for role_id in author_role_ids):
+            print(f"無視対象のロールを持つユーザー ({message.author}) が削除したメッセージを記録しません。")
+            return
+
+    # 削除メッセージを記録
+    if message.content:
+        deleted_message = {
+            "content": message.content,
+            "author": str(message.author),
+            "channel_name": message.channel.name,
+            "channel_id": message.channel.id,
+            "timestamp": datetime.utcnow()
+        }
+        result = collection.insert_one(deleted_message)
+        print(f"削除されたメッセージを記録 (ID: {result.inserted_id})")
+
+        # 埋め込みメッセージでログチャンネルに記録を送信
+        log_channel = bot.get_channel(LOG_CHANNEL_ID)
+        if log_channel:
+            embed = discord.Embed(
+                title="削除されたメッセージ記録",
+                color=discord.Color.red(),
+                timestamp=datetime.utcnow()
+            )
+            embed.add_field(name="内容", value=message.content, inline=False)
+            embed.add_field(name="送信者", value=str(message.author), inline=True)
+            embed.add_field(name="元のチャンネル", value=message.channel.name, inline=True)
+            embed.add_field(name="記録ID", value=str(result.inserted_id), inline=False)
+            embed.set_footer(text="削除メッセージ記録")
+            await log_channel.send(embed=embed)
+
+@bot.event
 async def on_message(message):
     # Botのメッセージは無視
     if message.author.bot:
