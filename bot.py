@@ -5,6 +5,7 @@ from discord.ext import commands
 from pymongo import MongoClient
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
+from bson import ObjectId  # ObjectIdのインポート
 
 # .envファイルから環境変数を読み込む
 load_dotenv()
@@ -79,7 +80,6 @@ async def on_message_delete(message):
 
 @bot.command()
 async def 復元(ctx, msg_id: str):
-    from bson.objectid import ObjectId
     try:
         # 通常のメッセージはObjectIdで検索
         msg_data = collection.find_one({"_id": ObjectId(msg_id)})
@@ -102,8 +102,8 @@ async def 復元(ctx, msg_id: str):
 @bot.command()
 async def automod_復元(ctx, decision_id: str):
     try:
-        # AutoModの通知は決定IDを文字列として検索
-        msg_data = collection.find_one({"decision_id": decision_id})
+        # AutoModの通知もObjectIdとして保存された場合、ObjectIdで検索
+        msg_data = collection.find_one({"decision_id": ObjectId(decision_id)})
         if msg_data:
             # AutoModの内容だけを復元
             embed = discord.Embed(
@@ -155,7 +155,7 @@ async def on_message(message):
                 "author_name": author_name,
                 "description": description,
                 "fields_text": fields_text,
-                "decision_id": decision_id,  # 文字列として保存
+                "decision_id": ObjectId(),  # ObjectIdとして保存
                 "timestamp": datetime.utcnow()
             }
             result = collection.insert_one(automod_notification)
