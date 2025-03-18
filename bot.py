@@ -56,7 +56,8 @@ async def on_message_delete(message):
             "author": str(message.author),
             "channel_name": message.channel.name,
             "channel_id": message.channel.id,
-            "timestamp": datetime.utcnow()
+            "timestamp": datetime.utcnow(),
+            "decision_id": str(message.id)  # AutoModの場合、決定IDやメッセージIDを記録
         }
         result = collection.insert_one(deleted_message)
         print(f"削除されたメッセージを記録 (ID: {result.inserted_id})")
@@ -77,19 +78,21 @@ async def on_message_delete(message):
 
 # --------------- メッセージ復元コマンド ---------------
 @bot.command()
-async def 復元(ctx, msg_id: str):
-    from bson.objectid import ObjectId
+async def 復元(ctx, decision_id: str):
     try:
-        msg_data = collection.find_one({"_id": ObjectId(msg_id)})
-        if msg_data:
+        # MongoDBでdecision_idを基にメッセージを検索
+        deleted_message = collection.find_one({"decision_id": decision_id})
+        
+        if deleted_message:
             embed = discord.Embed(
                 title="復元されたメッセージ",
                 color=discord.Color.green(),
                 timestamp=datetime.utcnow()
             )
-            embed.add_field(name="内容", value=msg_data['content'], inline=False)
-            embed.add_field(name="送信者", value=msg_data['author'], inline=True)
-            embed.add_field(name="元のチャンネル", value=msg_data['channel_name'], inline=True)
+            embed.add_field(name="内容", value=deleted_message['content'], inline=False)
+            embed.add_field(name="送信者", value=deleted_message['author'], inline=True)
+            embed.add_field(name="元のチャンネル", value=deleted_message['channel_name'], inline=True)
+            embed.add_field(name="決定ID", value=deleted_message['decision_id'], inline=False)
             embed.set_footer(text="復元完了")
             await ctx.send(embed=embed)
         else:
@@ -153,7 +156,7 @@ async def on_message(message):
             # Webhook送信
             await send_to_webhook(username="AutoMod Logger", avatar_url=None, content=webhook_message)
 
-            # MongoDBに保存
+            # MongoDBに保存（AutoModの通知も保存）
             automod_notification = {
                 "author_name": author_name,
                 "description": description,
