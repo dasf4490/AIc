@@ -107,8 +107,9 @@ async def automod_復元(ctx, decision_id: str):
         
         # ObjectIdとして検索
         msg_data = collection.find_one({"decision_id": decision_object_id})
-        
+
         if msg_data:
+            print(f"AutoModのデータが見つかりました: {msg_data}")  # デバッグ用
             # AutoModの内容だけを復元
             embed = discord.Embed(
                 title="AutoMod復元されたメッセージ",
@@ -118,7 +119,21 @@ async def automod_復元(ctx, decision_id: str):
             embed.add_field(name="メッセージ内容", value=msg_data['description'], inline=False)
             embed.set_footer(text="AutoMod復元完了")
             await ctx.send(embed=embed)
+
+            # ログチャンネルに送信
+            log_channel = bot.get_channel(LOG_CHANNEL_ID)
+            if log_channel:
+                embed_log = discord.Embed(
+                    title="AutoModによるメッセージ削除",
+                    color=discord.Color.orange(),
+                    timestamp=datetime.utcnow()
+                )
+                embed_log.add_field(name="送信者", value=msg_data['author_name'], inline=True)
+                embed_log.add_field(name="メッセージ内容", value=msg_data['description'], inline=False)
+                embed_log.set_footer(text="AutoMod通知")
+                await log_channel.send(embed=embed_log)
         else:
+            print(f"指定されたIDのAutoModメッセージが見つかりませんでした")  # デバッグ用
             await ctx.send("指定されたIDのAutoModメッセージが見つかりません。")
     except Exception as e:
         await ctx.send(f"エラーが発生しました: {str(e)}")
