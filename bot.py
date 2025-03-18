@@ -2,20 +2,25 @@ import discord
 import os
 import asyncio
 from discord.ext import commands
-from pymongo import MongoClient, DESCENDING
+from pymongo import MongoClient
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-# .envファイルから環境変数を読み込み
+# .envファイルから環境変数を読み込む
 load_dotenv()
 
-bot = commands.Bot(command_prefix="!")
+# Intentsを有効化
+intents = discord.Intents.default()
+intents.messages = True
+intents.message_content = True
+
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 # MongoDB接続設定
 MONGO_URI = os.getenv("MONGO_URI")
 client = MongoClient(MONGO_URI)
-db = client["discord_bot"]  # データベース名
-collection = db["deleted_messages"]  # コレクション名
+db = client["discord_bot"]
+collection = db["deleted_messages"]
 
 # 環境変数からDiscordトークンとログチャンネルIDを取得
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
@@ -36,21 +41,25 @@ async def on_message_delete(message):
             "author": str(message.author),
             "channel_name": message.channel.name,
             "channel_id": message.channel.id,
-            "timestamp": datetime.utcnow()  # UTCで保存
+            "timestamp": datetime.utcnow()
         }
         result = collection.insert_one(deleted_message)
         print(f"削除されたメッセージを記録 (ID: {result.inserted_id})")
 
-        # ログ用チャンネルに削除メッセージの記録を送信
+        # 埋め込みメッセージでログチャンネルに記録を送信
         log_channel = bot.get_channel(LOG_CHANNEL_ID)
         if log_channel:
-            await log_channel.send(
-                f"**削除されたメッセージが記録されました**\n"
-                f"ID: {result.inserted_id}\n"
-                f"内容: {message.content}\n"
-                f"送信者: {message.author}\n"
-                f"元のチャンネル: {message.channel.name}"
+            embed = discord.Embed(
+                title="削除されたメッセージ記録",
+                color=discord.Color.red(),
+                timestamp=datetime.utcnow()
             )
+            embed.add_field(name="内容", value=message.content, inline=False)
+            embed.add_field(name="送信者", value=str(message.author), inline=True)
+            embed.add_field(name="元のチャンネル", value=message.channel.name, inline=True)
+            embed.add_field(name="記録ID", value=str(result.inserted_id), inline=False)
+            embed.set_footer(text="削除メッセージ記録")
+            await log_channel.send(embed=embed)
 
 @bot.command()
 async def 復元(ctx, msg_id: str):
@@ -58,12 +67,17 @@ async def 復元(ctx, msg_id: str):
     try:
         msg_data = collection.find_one({"_id": ObjectId(msg_id)})
         if msg_data:
-            await ctx.send(
-                f"**復元されたメッセージ**\n"
-                f"内容: {msg_data['content']}\n"
-                f"送信者: {msg_data['author']}\n"
-                f"元のチャンネル: {msg_data['channel_name']}"
+            # 埋め込みメッセージで復元内容を送信
+            embed = discord.Embed(
+                title="復元されたメッセージ",
+                color=discord.Color.green(),
+                timestamp=datetime.utcnow()
             )
+            embed.add_field(name="内容", value=msg_data['content'], inline=False)
+            embed.add_field(name="送信者", value=msg_data['author'], inline=True)
+            embed.add_field(name="元のチャンネル", value=msg_data['channel_name'], inline=True)
+            embed.set_footer(text="復元完了")
+            await ctx.send(embed=embed)
         else:
             await ctx.send("指定されたIDのメッセージが見つかりません。")
     except Exception as e:
