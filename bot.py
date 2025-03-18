@@ -13,6 +13,7 @@ load_dotenv()
 intents = discord.Intents.default()
 intents.messages = True
 intents.message_content = True
+intents.guilds = True  # ロール情報にアクセス可能にする
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -22,9 +23,12 @@ client = MongoClient(MONGO_URI)
 db = client["discord_bot"]
 collection = db["deleted_messages"]
 
-# 環境変数からDiscordトークンとログチャンネルIDを取得
+# 環境変数からDiscordトークン、ログチャンネルID、無視するロールIDを取得
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID"))
+
+# 無視するロールIDを環境変数から取得し、リスト形式に変換
+IGNORED_ROLE_IDS = list(map(int, os.getenv("IGNORED_ROLE_IDS", "").split(',')))
 
 @bot.event
 async def on_ready():
@@ -34,8 +38,17 @@ async def on_ready():
 
 @bot.event
 async def on_message_delete(message):
+    if message.guild:  # サーバー内のメッセージか確認
+        # メッセージ送信者のロールIDを取得
+        author_role_ids = [role.id for role in message.author.roles]
+
+        # 無視するロールIDを持っている場合、記録しない
+        if any(role_id in IGNORED_ROLE_IDS for role_id in author_role_ids):
+            print(f"無視対象のロールを持つユーザー ({message.author}) が削除したメッセージを記録しません。")
+            return
+
+    # 削除メッセージを記録
     if message.content:
-        # 現在時刻をタイムスタンプとして記録
         deleted_message = {
             "content": message.content,
             "author": str(message.author),
@@ -67,7 +80,6 @@ async def 復元(ctx, msg_id: str):
     try:
         msg_data = collection.find_one({"_id": ObjectId(msg_id)})
         if msg_data:
-            # 埋め込みメッセージで復元内容を送信
             embed = discord.Embed(
                 title="復元されたメッセージ",
                 color=discord.Color.green(),
@@ -85,13 +97,10 @@ async def 復元(ctx, msg_id: str):
 
 async def delete_old_messages():
     while True:
-        # 24時間前のタイムスタンプを計算
         threshold_time = datetime.utcnow() - timedelta(hours=24)
-        # 古いメッセージを削除
         result = collection.delete_many({"timestamp": {"$lt": threshold_time}})
         if result.deleted_count > 0:
             print(f"{result.deleted_count}件の古いメッセージを削除しました。")
-        # 1時間ごとにチェック
         await asyncio.sleep(3600)
 
 bot.run(DISCORD_TOKEN)
