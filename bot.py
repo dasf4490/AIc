@@ -132,24 +132,39 @@ async def on_message(message):
 
 # 復元コマンド
 @bot.command()
-async def 復元(ctx, decision_id: str):
+async def 復元(ctx, msg_id: str):
+    from bson.objectid import ObjectId
     try:
-        # MongoDBでDecision IDを基にメッセージを検索
-        automod_notification = collection.find_one({"decision_id": decision_id})
-        
-        if automod_notification:
+        # MongoDBで通常メッセージを復元
+        msg_data = collection.find_one({"_id": ObjectId(msg_id)})
+        if msg_data:
             embed = discord.Embed(
-                title="復元されたAutoModメッセージ",
+                title="復元されたメッセージ",
                 color=discord.Color.green(),
                 timestamp=datetime.utcnow()
             )
-            embed.add_field(name="送信者", value=automod_notification['author_name'], inline=True)
-            embed.add_field(name="メッセージ内容", value=automod_notification['description'], inline=False)
-            embed.add_field(name="Decision ID", value=automod_notification['decision_id'], inline=False)
+            embed.add_field(name="内容", value=msg_data['content'], inline=False)
+            embed.add_field(name="送信者", value=msg_data['author'], inline=True)
+            embed.add_field(name="元のチャンネル", value=msg_data['channel_name'], inline=True)
+            embed.add_field(name="メッセージID", value=str(msg_data['_id']), inline=False)
             embed.set_footer(text="復元完了")
             await ctx.send(embed=embed)
         else:
-            await ctx.send("指定されたIDのAutoModメッセージが見つかりません。")
+            # AutoMod通知を復元
+            automod_notification = collection.find_one({"decision_id": msg_id})
+            if automod_notification:
+                embed = discord.Embed(
+                    title="復元されたAutoModメッセージ",
+                    color=discord.Color.green(),
+                    timestamp=datetime.utcnow()
+                )
+                embed.add_field(name="送信者", value=automod_notification['author_name'], inline=True)
+                embed.add_field(name="メッセージ内容", value=automod_notification['description'], inline=False)
+                embed.add_field(name="Decision ID", value=automod_notification['decision_id'], inline=False)
+                embed.set_footer(text="復元完了")
+                await ctx.send(embed=embed)
+            else:
+                await ctx.send("指定されたIDのメッセージが見つかりません。")
     except Exception as e:
         await ctx.send(f"エラーが発生しました: {str(e)}")
 
