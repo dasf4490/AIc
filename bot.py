@@ -5,7 +5,7 @@ from discord.ext import commands
 from pymongo import MongoClient
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
-from bson import ObjectId
+from bson import ObjectId  # ObjectIdのインポート
 
 # .envファイルから環境変数を読み込む
 load_dotenv()
@@ -14,7 +14,7 @@ load_dotenv()
 intents = discord.Intents.default()
 intents.messages = True
 intents.message_content = True
-intents.guilds = True
+intents.guilds = True  # ロール情報にアクセス可能にする
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -31,25 +31,27 @@ LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID"))
 # 無視するロールIDを環境変数から取得し、リスト形式に変換
 IGNORED_ROLE_IDS = list(map(int, os.getenv("IGNORED_ROLE_IDS", "").split(',')))
 
-# 削除されたメッセージを一時的に保持するリスト
-deleted_messages_buffer = []
-buffer_lock = asyncio.Lock()
+# AutoMod通知を監視するためのチャンネルID（環境変数）
+AUTOMOD_NOTIFICATION_CHANNEL_ID = int(os.getenv("AUTOMOD_NOTIFICATION_CHANNEL_ID"))
 
 @bot.event
 async def on_ready():
     print(f"Botが起動しました - {bot.user.name}")
-    # 定期的にログにまとめて送信
-    bot.loop.create_task(send_buffered_messages())
+    # 古いデータを削除するタスクを起動
+    bot.loop.create_task(delete_old_messages())
 
 @bot.event
 async def on_message_delete(message):
-    if message.guild:
+    if message.guild:  # サーバー内のメッセージか確認
+        # メッセージ送信者のロールIDを取得
         author_role_ids = [role.id for role in message.author.roles]
 
+        # 無視するロールIDを持っている場合、記録しない
         if any(role_id in IGNORED_ROLE_IDS for role_id in author_role_ids):
+            print(f"無視対象のロールを持つユーザー ({message.author}) が削除したメッセージを記録しません。")
             return
 
-    # 削除メッセージを一時的に保持
+    # 削除メッセージを記録
     if message.content:
         deleted_message = {
             "content": message.content,
@@ -58,14 +60,28 @@ async def on_message_delete(message):
             "channel_id": message.channel.id,
             "timestamp": datetime.utcnow()
         }
-        async with buffer_lock:
-            deleted_messages_buffer.append(deleted_message)
-        print(f"削除されたメッセージをバッファに追加 (ID: {len(deleted_messages_buffer)})")
+        result = collection.insert_one(deleted_message)
+        print(f"削除されたメッセージを記録 (ID: {result.inserted_id})")
+
+        # 埋め込みメッセージでログチャンネルに記録を送信
+        log_channel = bot.get_channel(LOG_CHANNEL_ID)
+        if log_channel:
+            embed = discord.Embed(
+                title="削除されたメッセージ記録",
+                color=discord.Color.red(),
+                timestamp=datetime.utcnow()
+            )
+            embed.add_field(name="内容", value=message.content, inline=False)
+            embed.add_field(name="送信者", value=str(message.author), inline=True)
+            embed.add_field(name="元のチャンネル", value=message.channel.name, inline=True)
+            embed.add_field(name="記録ID", value=str(result.inserted_id), inline=False)
+            embed.set_footer(text="削除メッセージ記録")
+            await log_channel.send(embed=embed)
 
 @bot.command()
 async def 復元(ctx, msg_id: str):
     try:
-        # ObjectIdを使用して削除されたメッセージを取得
+        # 通常のメッセージはObjectIdで検索
         msg_data = collection.find_one({"_id": ObjectId(msg_id)})
         if msg_data:
             embed = discord.Embed(
@@ -83,37 +99,86 @@ async def 復元(ctx, msg_id: str):
     except Exception as e:
         await ctx.send(f"エラーが発生しました: {str(e)}")
 
-async def send_buffered_messages():
-    while True:
-        # 1分待機
-        await asyncio.sleep(60)
+@bot.command()
+async def automod_復元(ctx, decision_id: str):
+    try:
+        # AutoModの通知もdecision_idを文字列として保存しているため、文字列で検索
+        msg_data = collection.find_one({"decision_id": decision_id})
         
-        # メッセージをまとめて送信
-        if deleted_messages_buffer:
-            async with buffer_lock:
-                # バッファの内容をコピーして送信
-                messages_to_send = list(deleted_messages_buffer)
-                deleted_messages_buffer.clear()
+        # もし AutoMod メッセージが見つかった場合
+        if msg_data:
+            # AutoModの内容だけを復元
+            embed = discord.Embed(
+                title="AutoMod復元されたメッセージ",
+                color=discord.Color.green(),
+                timestamp=datetime.now(timezone.utc)  # UTCタイムゾーンで現在時刻を取得
+            )
+            embed.add_field(name="メッセージ内容", value=msg_data['description'], inline=False)
+            embed.set_footer(text="AutoMod復元完了")
+            await ctx.send(embed=embed)
+        else:
+            await ctx.send("指定されたIDのAutoModメッセージが見つかりません。")
+    except Exception as e:
+        await ctx.send(f"エラーが発生しました: {str(e)}")
 
+async def delete_old_messages():
+    while True:
+        threshold_time = datetime.utcnow() - timedelta(hours=24)
+        result = collection.delete_many({"timestamp": {"$lt": threshold_time}})
+        if result.deleted_count > 0:
+            print(f"{result.deleted_count}件の古いメッセージを削除しました。")
+        await asyncio.sleep(3600)
+
+@bot.event
+async def on_message(message):
+    # Botのメッセージは無視
+    if message.author.bot:
+        return
+
+    # AutoMod通知チャンネルの監視
+    if message.channel.id == AUTOMOD_NOTIFICATION_CHANNEL_ID:
+        if message.embeds:
+            embed = message.embeds[0]
+
+            # 送信者名（AutoModの場合は不明な場合もある）
+            author_name = embed.author.name if embed.author else "不明なユーザー"
+            description = embed.description or "（本文なし）"
+
+            # Embedフィールドから必要な情報を取り出し
+            fields_text = ""
+            for field in embed.fields:
+                fields_text += f"{field.name}: {field.value}\n"
+
+            # 生成されたObjectIdをdecision_idとして保存
+            decision_id = str(ObjectId())  # ObjectIdを生成
+
+            # MongoDBに保存（AutoModの通知も保存）
+            automod_notification = {
+                "author_name": author_name,
+                "description": description,
+                "fields_text": fields_text,
+                "decision_id": decision_id,  # 生成したObjectIdを決定IDとして保存
+                "timestamp": datetime.utcnow()
+            }
+            result = collection.insert_one(automod_notification)
+            print(f"AutoMod通知をログに記録 (ID: {result.inserted_id})")
+
+            # AutoMod通知をログチャンネルに送信
             log_channel = bot.get_channel(LOG_CHANNEL_ID)
             if log_channel:
-                # まとめて送信する埋め込みメッセージを作成
-                embed = discord.Embed(
-                    title="削除されたメッセージのまとめ",
-                    color=discord.Color.red(),
+                embed_log = discord.Embed(
+                    title="AutoModによるメッセージ削除",
+                    color=discord.Color.orange(),
                     timestamp=datetime.utcnow()
                 )
+                embed_log.add_field(name="送信者", value=author_name, inline=True)
+                embed_log.add_field(name="メッセージ内容", value=description, inline=False)
+                embed_log.add_field(name="詳細", value=fields_text, inline=False)
+                embed_log.add_field(name="Decision ID", value=decision_id, inline=False)
+                embed_log.set_footer(text="AutoMod通知")
+                await log_channel.send(embed=embed_log)
 
-                # メッセージ内容をリストとして表示
-                for msg in messages_to_send:
-                    embed.add_field(
-                        name=f"復元用ID: {ObjectId()}",
-                        value=f"**内容**: {msg['content']}\n**送信者**: {msg['author']}\n**チャンネル**: {msg['channel_name']}",
-                        inline=False
-                    )
-
-                embed.set_footer(text="削除メッセージ記録")
-                await log_channel.send(embed=embed)
-                print(f"まとめて削除メッセージを送信しました。")
+    # コマンドも処理するために必要
+    await bot.process_commands(message)
 
 bot.run(DISCORD_TOKEN)
